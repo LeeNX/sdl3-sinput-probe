@@ -107,3 +107,8 @@ tools/sinput_try.py            hil_runner + sdl3probe driver
 results/                       logs from runs on real hardware
 .github/workflows/build.yml    arm64 + amd64 on native runners; tags v* publish a release
 ```
+
+## License
+
+The probe, scripts and build files here are [MIT](LICENSE). The release tarballs also contain SDL3, which is under
+the [zlib license](https://github.com/libsdl-org/SDL/blob/main/LICENSE.txt).
