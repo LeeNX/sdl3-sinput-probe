@@ -1,0 +1,123 @@
+paired 98:3D:AE:52:7A:CA
+>> RESET: OK
+>> BATTERY 77: OK
+>> RUMBLE?: RUMBLE recv=1 left=0 right=0
+>> RGB?: RGB recv=0 r=10 g=20 b=30
+>> PLED?: PLED recv=0 3
+sdl | sdl_version=3.4.18
+sdl | sdl_revision=SDL-release-3.4.18-0-g829a65d76
+sdl | hidapi=1
+sdl | joysticks=1
+sdl | joystick.0=HILpad esp32c3 vid=2e8a pid=10c6 gamepad=1 type=standard path=/dev/hidraw0
+sdl | name=HILpad esp32c3
+sdl | path=/dev/hidraw0
+sdl | driver=hidapi
+sdl | vid=2e8a
+sdl | pid=10c6
+sdl | version=21bf
+sdl | serial=00-00-00-00-00-00
+sdl | type=standard
+sdl | real_type=standard
+sdl | connection=wireless
+sdl | power=unknown
+sdl | battery=-1
+sdl | cap.rumble=1
+sdl | cap.trigger_rumble=0
+sdl | cap.rgb_led=1
+sdl | cap.mono_led=0
+sdl | cap.player_led=1
+sdl | buttons=a b x y back guide start leftstick rightstick leftshoulder rightshoulder dpup dpdown dpleft dpright misc1 paddle1 paddle2 paddle3 paddle4 touchpad misc2 misc3 misc4 misc5 misc6
+sdl | axes=leftx lefty rightx righty lefttrigger righttrigger
+sdl | touchpads=1
+sdl | touchpad.0.fingers=2
+sdl | sensor.accel=1 rate=200.0
+sdl | sensor.gyro=1 rate=200.0
+sdl | state.leftx=0
+sdl | state.lefty=0
+sdl | state.rightx=0
+sdl | state.righty=0
+sdl | state.lefttrigger=0
+sdl | state.righttrigger=0
+sdl | mapping=050063ae8a2e0000c6100000bf216801,*,face:abxy,leftx:a0,lefty:a1,rightx:a2,righty:a3,lefttrigger:a4,righttrigger:a5,a:b0,b:b1,x:b2,y:b3,dpup:h0.1,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,leftstick:b4,rightstick:b5,leftshoulder:b6,rightshoulder:b7,misc6:b8,misc7:b9,paddle2:b10,paddle1:b11,start:b12,back:b13,guide:b14,misc1:b15,paddle4:b16,paddle3:b17,touchpad:b18,misc8:b19,misc2:b20,misc3:b21,misc4:b22,misc5:b23,crc:ae63,platform:Linux,
+sdl | rumble=1
+sdl | led=1
+sdl | player=1
+>> RUMBLE?: RUMBLE recv=1 left=200 right=40
+>> RGB?: RGB recv=1 r=10 g=20 b=30
+>> PLED?: PLED recv=1 3
+sdl | ev t=1699 button a down
+sdl | ev t=1699 sensor gyro -0.0000 0.0000 -0.0000
+sdl | ev t=1699 sensor accel -0.0000 0.0000 -0.0000
+>> PRESS 1: OK
+sdl | ev t=2120 button a up
+sdl | ev t=2120 sensor gyro -0.0000 0.0000 -0.0000
+sdl | ev t=2120 sensor accel -0.0000 0.0000 -0.0000
+>> RELEASE 1: OK
+sdl | ev t=2530 button b down
+sdl | ev t=2530 sensor gyro -0.0000 0.0000 -0.0000
+sdl | ev t=2530 sensor accel -0.0000 0.0000 -0.0000
+>> PRESS 2: OK
+sdl | ev t=2949 button b up
+sdl | ev t=2949 sensor gyro -0.0000 0.0000 -0.0000
+sdl | ev t=2949 sensor accel -0.0000 0.0000 -0.0000
+>> RELEASE 2: OK
+sdl | ev t=3361 button back down
+sdl | ev t=3361 sensor gyro -0.0000 0.0000 -0.0000
+sdl | ev t=3361 sensor accel -0.0000 0.0000 -0.0000
+>> SPECIAL PRESS 1: OK
+sdl | ev t=3780 button back up
+sdl | ev t=3780 sensor gyro -0.0000 0.0000 -0.0000
+sdl | ev t=3780 sensor accel -0.0000 0.0000 -0.0000
+>> SPECIAL RELEASE 1: OK
+sdl | ev t=4193 button dpup down
+sdl | ev t=4193 sensor gyro -0.0000 0.0000 -0.0000
+sdl | ev t=4193 sensor accel -0.0000 0.0000 -0.0000
+>> HAT 1 1: OK
+sdl | ev t=4603 button dpup up
+sdl | ev t=4603 sensor gyro -0.0000 0.0000 -0.0000
+sdl | ev t=4603 sensor accel -0.0000 0.0000 -0.0000
+>> HAT 1 0: OK
+>> AXIS x 16000: OK
+sdl | ev t=5041 axis leftx 0
+sdl | ev t=5041 axis leftx 16000
+sdl | ev t=5041 sensor gyro -0.0000 0.0000 -0.0000
+sdl | ev t=5041 sensor accel -0.0000 0.0000 -0.0000
+sdl | ev t=5434 axis leftx 0
+sdl | ev t=5434 sensor gyro -0.0000 0.0000 -0.0000
+sdl | ev t=5434 sensor accel -0.0000 0.0000 -0.0000
+>> AXIS x 0: OK
+>> AXIS rx 32767: OK
+sdl | ev t=5872 axis lefttrigger 16383
+sdl | ev t=5872 axis lefttrigger 32767
+sdl | ev t=5872 sensor gyro -0.0000 0.0000 -0.0000
+sdl | ev t=5872 sensor accel -0.0000 0.0000 -0.0000
+sdl | ev t=6266 axis lefttrigger 16383
+sdl | ev t=6266 sensor gyro -0.0000 0.0000 -0.0000
+sdl | ev t=6266 sensor accel -0.0000 0.0000 -0.0000
+>> AXIS rx 0: OK
+sdl | ev t=6686 axis rightx 0
+sdl | ev t=6686 axis rightx 12345
+sdl | ev t=6686 sensor gyro -0.0000 0.0000 -0.0000
+sdl | ev t=6686 sensor accel -0.0000 0.0000 -0.0000
+>> AXIS z 12345: OK
+sdl | ev t=7096 axis rightx 0
+sdl | ev t=7096 sensor gyro -0.0000 0.0000 -0.0000
+sdl | ev t=7097 sensor accel -0.0000 0.0000 -0.0000
+>> AXIS z 0: OK
+sdl | ev t=7517 sensor gyro -0.1065 0.3196 0.2131
+sdl | ev t=7517 sensor accel 9.8067 19.6133 -9.8067
+>> MOTION 100 -200 300 -4096 4096 8192: OK
+sdl | ev t=7928 sensor gyro -0.1065 0.3196 0.2131
+sdl | ev t=7928 sensor accel 9.8067 19.6133 -9.8067
+sdl | ev t=7928 touch down pad=0 finger=0 x=0.5153 y=0.4847 p=0.0153
+>> TOUCH 0 1000 -1000 500: OK
+sdl | ev t=8348 sensor gyro -0.1065 0.3196 0.2131
+sdl | ev t=8348 sensor accel 9.8067 19.6133 -9.8067
+sdl | ev t=8348 touch up pad=0 finger=0 x=0.5000 y=0.5000 p=0.0000
+>> TOUCH 0 0 0 0: OK
+sdl | ev t=8760 sensor gyro -0.0000 0.0000 -0.0000
+sdl | ev t=8761 sensor accel -0.0000 0.0000 -0.0000
+>> MOTION 0 0 0 0 0 0: OK
+sdl | final.power=unknown
+sdl | final.battery=-1
+probe rc 0
