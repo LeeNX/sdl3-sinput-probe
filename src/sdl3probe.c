@@ -1,14 +1,20 @@
 /* sdl3probe -- what SDL3 sees of a gamepad: driver path, caps, sensors, touchpads, live events.
  *
- *   sdl3probe [--wait S] [--events S] [--rumble LO HI MS] [--led R G B] [--player N] [--no-hidapi]
+ *   sdl3probe [--wait S] [--events S] [--rumble LO HI MS] [--led R G B] [--player N] [--no-hidapi] [--json]
  *
- * Prints one key=value line per fact so a test script can grep it. A path starting with /dev/hidraw means the
- * HIDAPI driver (SInput here) owns the device; /dev/input/event* means SDL fell back to evdev.
+ * Prints one key=value line per fact so a test script can grep it, or with --json one JSON object per line:
+ * {"fact": key, "value": v} for facts and {"ev": kind, "t": ms, "mono_ns": ns, ...} for events. A path starting
+ * with /dev/hidraw means the HIDAPI driver (SInput here) owns the device; /dev/input/event* means SDL fell back to
+ * evdev. "listening" marks the start of the event stream. SIGINT/SIGTERM end the stream early, still printing the
+ * final.* facts.
  */
 #include <SDL3/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+
+static int json = 0;
 
 static const char *ctype(SDL_JoystickConnectionState s)
 {
@@ -32,6 +38,97 @@ static const char *pstate(SDL_PowerState s)
     }
 }
 
+/* A JSON string literal; NULL prints as "". */
+static void jstr(const char *s)
+{
+    putchar('"');
+    for (const unsigned char *p = (const unsigned char *)(s ? s : ""); *p; p++) {
+        if (*p == '"' || *p == '\\') printf("\\%c", *p);
+        else if (*p < 0x20) printf("\\u%04x", *p);
+        else putchar(*p);
+    }
+    putchar('"');
+}
+
+static void fact_s(const char *k, const char *v)
+{
+    if (!json) {
+        printf("%s=%s\n", k, v ? v : "");
+        return;
+    }
+    printf("{\"fact\":");
+    jstr(k);
+    printf(",\"value\":");
+    jstr(v);
+    printf("}\n");
+}
+
+static void fact_i(const char *k, long long v)
+{
+    if (json) {
+        printf("{\"fact\":");
+        jstr(k);
+        printf(",\"value\":%lld}\n", v);
+    } else {
+        printf("%s=%lld\n", k, v);
+    }
+}
+
+static void fact_hex(const char *k, unsigned v)
+{
+    char b[8];
+    snprintf(b, sizeof b, "%04x", v);
+    fact_s(k, b);
+}
+
+/* A space-separated list in text mode, a JSON array of strings with --json. */
+static void fact_list(const char *k, const char **items, int n)
+{
+    if (json) {
+        printf("{\"fact\":");
+        jstr(k);
+        printf(",\"value\":[");
+        for (int i = 0; i < n; i++) {
+            if (i) putchar(',');
+            jstr(items[i]);
+        }
+        printf("]}\n");
+    } else {
+        printf("%s=", k);
+        for (int i = 0; i < n; i++) printf("%s ", items[i]);
+        putchar('\n');
+    }
+}
+
+static Uint64 mono_ns(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (Uint64)ts.tv_sec * 1000000000ull + (Uint64)ts.tv_nsec;
+}
+
+/* Starts an event line: SDL's own timestamp (ms since init, as before) and the same instant on CLOCK_MONOTONIC,
+ * which other processes (a test script's time.monotonic_ns(), a second probe) share. The offset between the two
+ * clocks is taken now, not once at start, so NTP slewing of CLOCK_MONOTONIC can't build up over a long run. */
+static void ev_begin(const char *kind, Uint64 ts_ns)
+{
+    Uint64 now_ticks = SDL_GetTicksNS(), now_mono = mono_ns();
+    Uint64 age = now_ticks > ts_ns ? now_ticks - ts_ns : 0;
+    if (json) {
+        printf("{\"ev\":");
+        jstr(kind);
+        printf(",\"t\":%llu,\"mono_ns\":%llu", (unsigned long long)(ts_ns / 1000000),
+               (unsigned long long)(now_mono - age));
+    } else {
+        printf("ev t=%llu %s", (unsigned long long)(ts_ns / 1000000), kind);
+    }
+}
+
+static void ev_end(void)
+{
+    puts(json ? "}" : "");
+}
+
 int main(int argc, char **argv)
 {
     double wait_s = 5, events_s = 0;
@@ -45,9 +142,10 @@ int main(int argc, char **argv)
             led = 1; r = atoi(argv[++i]); g = atoi(argv[++i]); b = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--player") && i + 1 < argc) player = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--no-hidapi")) hidapi = 0;
+        else if (!strcmp(argv[i], "--json")) json = 1;
         else {
             fprintf(stderr, "usage: %s [--wait S] [--events S] [--rumble LO HI MS] [--led R G B] [--player N] "
-                            "[--no-hidapi]\n", argv[0]);
+                            "[--no-hidapi] [--json]\n", argv[0]);
             return 2;
         }
     }
@@ -55,12 +153,15 @@ int main(int argc, char **argv)
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI, hidapi ? "1" : "0");
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_SINPUT, hidapi ? "1" : "0");
     if (!SDL_Init(SDL_INIT_GAMEPAD | SDL_INIT_HAPTIC | SDL_INIT_SENSOR)) {
-        printf("error=SDL_Init: %s\n", SDL_GetError());
+        fact_s("error", SDL_GetError());
         return 1;
     }
     int v = SDL_GetVersion();
-    printf("sdl_version=%d.%d.%d\nsdl_revision=%s\nhidapi=%d\n", SDL_VERSIONNUM_MAJOR(v), SDL_VERSIONNUM_MINOR(v),
-           SDL_VERSIONNUM_MICRO(v), SDL_GetRevision(), hidapi);
+    char vbuf[32];
+    snprintf(vbuf, sizeof vbuf, "%d.%d.%d", SDL_VERSIONNUM_MAJOR(v), SDL_VERSIONNUM_MINOR(v), SDL_VERSIONNUM_MICRO(v));
+    fact_s("sdl_version", vbuf);
+    fact_s("sdl_revision", SDL_GetRevision());
+    fact_i("hidapi", hidapi);
 
     /* Joysticks show up as events after init; pump until one is a gamepad or the wait runs out. */
     SDL_Gamepad *pad = NULL;
@@ -75,15 +176,30 @@ int main(int argc, char **argv)
 
     int n = 0;
     SDL_JoystickID *ids = SDL_GetJoysticks(&n);
-    printf("joysticks=%d\n", n);
+    fact_i("joysticks", n);
     for (int i = 0; i < n; i++) {
-        printf("joystick.%d=%s vid=%04x pid=%04x gamepad=%d type=%s path=%s\n", i, SDL_GetJoystickNameForID(ids[i]),
-               SDL_GetJoystickVendorForID(ids[i]), SDL_GetJoystickProductForID(ids[i]), SDL_IsGamepad(ids[i]),
-               SDL_GetGamepadStringForType(SDL_GetGamepadTypeForID(ids[i])), SDL_GetJoystickPathForID(ids[i]));
+        const char *jname = SDL_GetJoystickNameForID(ids[i]), *jpath = SDL_GetJoystickPathForID(ids[i]);
+        const char *jtype = SDL_GetGamepadStringForType(SDL_GetGamepadTypeForID(ids[i]));
+        if (json) {
+            printf("{\"fact\":\"joystick\",\"value\":{\"index\":%d,\"name\":", i);
+            jstr(jname);
+            printf(",\"vid\":\"%04x\",\"pid\":\"%04x\",\"gamepad\":%d,\"type\":", SDL_GetJoystickVendorForID(ids[i]),
+                   SDL_GetJoystickProductForID(ids[i]), SDL_IsGamepad(ids[i]));
+            jstr(jtype);
+            printf(",\"path\":");
+            jstr(jpath);
+            printf("}}\n");
+        } else {
+            printf("joystick.%d=%s vid=%04x pid=%04x gamepad=%d type=%s path=%s\n", i, jname,
+                   SDL_GetJoystickVendorForID(ids[i]), SDL_GetJoystickProductForID(ids[i]), SDL_IsGamepad(ids[i]),
+                   jtype, jpath);
+        }
     }
     SDL_free(ids);
     if (!pad) {
-        printf("error=no gamepad within %.1fs\n", wait_s);
+        char e[64];
+        snprintf(e, sizeof e, "no gamepad within %.1fs", wait_s);
+        fact_s("error", e);
         SDL_Quit();
         return 1;
     }
@@ -95,97 +211,151 @@ int main(int argc, char **argv)
         SDL_Delay(10);
     }
     const char *path = SDL_GetGamepadPath(pad);
-    printf("name=%s\npath=%s\ndriver=%s\n", SDL_GetGamepadName(pad), path ? path : "",
-           path && !strncmp(path, "/dev/hidraw", 11) ? "hidapi" : "evdev");
-    printf("vid=%04x\npid=%04x\nversion=%04x\nserial=%s\n", SDL_GetGamepadVendor(pad), SDL_GetGamepadProduct(pad),
-           SDL_GetGamepadProductVersion(pad), SDL_GetGamepadSerial(pad) ? SDL_GetGamepadSerial(pad) : "");
-    printf("type=%s\nreal_type=%s\n", SDL_GetGamepadStringForType(SDL_GetGamepadType(pad)),
-           SDL_GetGamepadStringForType(SDL_GetRealGamepadType(pad)));
-    printf("connection=%s\n", ctype(SDL_GetGamepadConnectionState(pad)));
+    fact_s("name", SDL_GetGamepadName(pad));
+    fact_s("path", path);
+    fact_s("driver", path && !strncmp(path, "/dev/hidraw", 11) ? "hidapi" : "evdev");
+    fact_hex("vid", SDL_GetGamepadVendor(pad));
+    fact_hex("pid", SDL_GetGamepadProduct(pad));
+    fact_hex("version", SDL_GetGamepadProductVersion(pad));
+    fact_s("serial", SDL_GetGamepadSerial(pad));
+    fact_s("type", SDL_GetGamepadStringForType(SDL_GetGamepadType(pad)));
+    fact_s("real_type", SDL_GetGamepadStringForType(SDL_GetRealGamepadType(pad)));
+    fact_s("connection", ctype(SDL_GetGamepadConnectionState(pad)));
     int pct = -1;
     SDL_PowerState ps = SDL_GetGamepadPowerInfo(pad, &pct);
-    printf("power=%s\nbattery=%d\n", pstate(ps), pct);
+    fact_s("power", pstate(ps));
+    fact_i("battery", pct);
 
     SDL_PropertiesID props = SDL_GetGamepadProperties(pad);
-    printf("cap.rumble=%d\ncap.trigger_rumble=%d\ncap.rgb_led=%d\ncap.mono_led=%d\ncap.player_led=%d\n",
-           SDL_GetBooleanProperty(props, SDL_PROP_GAMEPAD_CAP_RUMBLE_BOOLEAN, false),
-           SDL_GetBooleanProperty(props, SDL_PROP_GAMEPAD_CAP_TRIGGER_RUMBLE_BOOLEAN, false),
-           SDL_GetBooleanProperty(props, SDL_PROP_GAMEPAD_CAP_RGB_LED_BOOLEAN, false),
-           SDL_GetBooleanProperty(props, SDL_PROP_GAMEPAD_CAP_MONO_LED_BOOLEAN, false),
-           SDL_GetBooleanProperty(props, SDL_PROP_GAMEPAD_CAP_PLAYER_LED_BOOLEAN, false));
+    fact_i("cap.rumble", SDL_GetBooleanProperty(props, SDL_PROP_GAMEPAD_CAP_RUMBLE_BOOLEAN, false));
+    fact_i("cap.trigger_rumble", SDL_GetBooleanProperty(props, SDL_PROP_GAMEPAD_CAP_TRIGGER_RUMBLE_BOOLEAN, false));
+    fact_i("cap.rgb_led", SDL_GetBooleanProperty(props, SDL_PROP_GAMEPAD_CAP_RGB_LED_BOOLEAN, false));
+    fact_i("cap.mono_led", SDL_GetBooleanProperty(props, SDL_PROP_GAMEPAD_CAP_MONO_LED_BOOLEAN, false));
+    fact_i("cap.player_led", SDL_GetBooleanProperty(props, SDL_PROP_GAMEPAD_CAP_PLAYER_LED_BOOLEAN, false));
 
-    printf("buttons=");
+    const char *names[(int)SDL_GAMEPAD_BUTTON_COUNT + (int)SDL_GAMEPAD_AXIS_COUNT];
+    int nn = 0;
     for (int bt = 0; bt < SDL_GAMEPAD_BUTTON_COUNT; bt++) {
         if (SDL_GamepadHasButton(pad, (SDL_GamepadButton)bt))
-            printf("%s ", SDL_GetGamepadStringForButton((SDL_GamepadButton)bt));
+            names[nn++] = SDL_GetGamepadStringForButton((SDL_GamepadButton)bt);
     }
-    printf("\naxes=");
+    fact_list("buttons", names, nn);
+    nn = 0;
     for (int ax = 0; ax < SDL_GAMEPAD_AXIS_COUNT; ax++) {
-        if (SDL_GamepadHasAxis(pad, (SDL_GamepadAxis)ax))
-            printf("%s ", SDL_GetGamepadStringForAxis((SDL_GamepadAxis)ax));
+        if (SDL_GamepadHasAxis(pad, (SDL_GamepadAxis)ax)) names[nn++] = SDL_GetGamepadStringForAxis((SDL_GamepadAxis)ax);
     }
-    printf("\ntouchpads=%d\n", SDL_GetNumGamepadTouchpads(pad));
-    for (int t = 0; t < SDL_GetNumGamepadTouchpads(pad); t++)
-        printf("touchpad.%d.fingers=%d\n", t, SDL_GetNumGamepadTouchpadFingers(pad, t));
+    fact_list("axes", names, nn);
+    fact_i("touchpads", SDL_GetNumGamepadTouchpads(pad));
+    char key[64];
+    for (int t = 0; t < SDL_GetNumGamepadTouchpads(pad); t++) {
+        snprintf(key, sizeof key, "touchpad.%d.fingers", t);
+        fact_i(key, SDL_GetNumGamepadTouchpadFingers(pad, t));
+    }
     SDL_SensorType sensors[] = {SDL_SENSOR_ACCEL, SDL_SENSOR_GYRO};
     const char *sname[] = {"accel", "gyro"};
     for (int s = 0; s < 2; s++) {
         bool has = SDL_GamepadHasSensor(pad, sensors[s]);
-        printf("sensor.%s=%d rate=%.1f\n", sname[s], has, has ? SDL_GetGamepadSensorDataRate(pad, sensors[s]) : 0.0);
+        float rate = has ? SDL_GetGamepadSensorDataRate(pad, sensors[s]) : 0.0f;
+        if (json) {
+            printf("{\"fact\":\"sensor.%s\",\"value\":%d}\n{\"fact\":\"sensor.%s.rate\",\"value\":%.1f}\n", sname[s],
+                   has, sname[s], rate);
+        } else {
+            printf("sensor.%s=%d rate=%.1f\n", sname[s], has, rate);
+        }
         if (has && events_s > 0) SDL_SetGamepadSensorEnabled(pad, sensors[s], true);
     }
     for (int ax = 0; ax < SDL_GAMEPAD_AXIS_COUNT; ax++) {
-        if (SDL_GamepadHasAxis(pad, (SDL_GamepadAxis)ax))
-            printf("state.%s=%d\n", SDL_GetGamepadStringForAxis((SDL_GamepadAxis)ax),
-                   SDL_GetGamepadAxis(pad, (SDL_GamepadAxis)ax));
+        if (SDL_GamepadHasAxis(pad, (SDL_GamepadAxis)ax)) {
+            snprintf(key, sizeof key, "state.%s", SDL_GetGamepadStringForAxis((SDL_GamepadAxis)ax));
+            fact_i(key, SDL_GetGamepadAxis(pad, (SDL_GamepadAxis)ax));
+        }
     }
     char *mapping = SDL_GetGamepadMapping(pad);
-    printf("mapping=%s\n", mapping ? mapping : "");
+    fact_s("mapping", mapping);
     SDL_free(mapping);
 
-    if (rumble) printf("rumble=%d\n", SDL_RumbleGamepad(pad, (Uint16)lo, (Uint16)hi, (Uint32)ms));
-    if (led) printf("led=%d\n", SDL_SetGamepadLED(pad, (Uint8)r, (Uint8)g, (Uint8)b));
-    if (player >= 0) printf("player=%d\n", SDL_SetGamepadPlayerIndex(pad, player));
+    if (rumble) fact_i("rumble", SDL_RumbleGamepad(pad, (Uint16)lo, (Uint16)hi, (Uint32)ms));
+    if (led) fact_i("led", SDL_SetGamepadLED(pad, (Uint8)r, (Uint8)g, (Uint8)b));
+    if (player >= 0) fact_i("player", SDL_SetGamepadPlayerIndex(pad, player));
     if (!rumble && !led && player < 0 && events_s <= 0) goto done;
 
-    /* Live events: one line each, sensor events throttled to one per 250 ms per sensor. */
+    /* Live events, one line each. Sensors report at their data rate whether or not anything moved: text mode
+     * throttles them to one line per 250 ms per sensor, --json prints only a changed reading. */
+    fact_i("listening", 1);
+    fflush(stdout);
     Uint64 last_sensor[2] = {0, 0};
+    float last_data[2][3] = {{0}};
+    int seen[2] = {0, 0};
     end = SDL_GetTicks() + (Uint64)((events_s > 0 ? events_s : ms / 1000.0 + 0.2) * 1000);
     while (SDL_GetTicks() < end) {
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
-            Uint64 t = SDL_GetTicks();
             switch (ev.type) {
             case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
-            case SDL_EVENT_GAMEPAD_BUTTON_UP:
-                printf("ev t=%llu button %s %s\n", (unsigned long long)t,
-                       SDL_GetGamepadStringForButton((SDL_GamepadButton)ev.gbutton.button),
-                       ev.gbutton.down ? "down" : "up");
+            case SDL_EVENT_GAMEPAD_BUTTON_UP: {
+                const char *bn = SDL_GetGamepadStringForButton((SDL_GamepadButton)ev.gbutton.button);
+                ev_begin("button", ev.common.timestamp);
+                if (json) {
+                    printf(",\"name\":");
+                    jstr(bn);
+                    printf(",\"down\":%s", ev.gbutton.down ? "true" : "false");
+                } else {
+                    printf(" %s %s", bn, ev.gbutton.down ? "down" : "up");
+                }
+                ev_end();
                 break;
-            case SDL_EVENT_GAMEPAD_AXIS_MOTION:
-                printf("ev t=%llu axis %s %d\n", (unsigned long long)t,
-                       SDL_GetGamepadStringForAxis((SDL_GamepadAxis)ev.gaxis.axis), ev.gaxis.value);
+            }
+            case SDL_EVENT_GAMEPAD_AXIS_MOTION: {
+                const char *an = SDL_GetGamepadStringForAxis((SDL_GamepadAxis)ev.gaxis.axis);
+                ev_begin("axis", ev.common.timestamp);
+                if (json) {
+                    printf(",\"name\":");
+                    jstr(an);
+                    printf(",\"value\":%d", ev.gaxis.value);
+                } else {
+                    printf(" %s %d", an, ev.gaxis.value);
+                }
+                ev_end();
                 break;
+            }
             case SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN:
             case SDL_EVENT_GAMEPAD_TOUCHPAD_MOTION:
-            case SDL_EVENT_GAMEPAD_TOUCHPAD_UP:
-                printf("ev t=%llu touch %s pad=%d finger=%d x=%.4f y=%.4f p=%.4f\n", (unsigned long long)t,
-                       ev.type == SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN ? "down"
-                       : ev.type == SDL_EVENT_GAMEPAD_TOUCHPAD_UP ? "up" : "motion",
-                       ev.gtouchpad.touchpad, ev.gtouchpad.finger, ev.gtouchpad.x, ev.gtouchpad.y,
-                       ev.gtouchpad.pressure);
+            case SDL_EVENT_GAMEPAD_TOUCHPAD_UP: {
+                const char *act = ev.type == SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN ? "down"
+                                  : ev.type == SDL_EVENT_GAMEPAD_TOUCHPAD_UP ? "up" : "motion";
+                ev_begin("touch", ev.common.timestamp);
+                if (json) {
+                    printf(",\"action\":\"%s\",\"pad\":%d,\"finger\":%d,\"x\":%.4f,\"y\":%.4f,\"p\":%.4f", act,
+                           ev.gtouchpad.touchpad, ev.gtouchpad.finger, ev.gtouchpad.x, ev.gtouchpad.y,
+                           ev.gtouchpad.pressure);
+                } else {
+                    printf(" %s pad=%d finger=%d x=%.4f y=%.4f p=%.4f", act, ev.gtouchpad.touchpad,
+                           ev.gtouchpad.finger, ev.gtouchpad.x, ev.gtouchpad.y, ev.gtouchpad.pressure);
+                }
+                ev_end();
                 break;
+            }
             case SDL_EVENT_GAMEPAD_SENSOR_UPDATE: {
                 int s = ev.gsensor.sensor == SDL_SENSOR_GYRO;
-                if (t - last_sensor[s] >= 250) {
-                    last_sensor[s] = t;
-                    printf("ev t=%llu sensor %s %.4f %.4f %.4f\n", (unsigned long long)t, sname[s],
-                           ev.gsensor.data[0], ev.gsensor.data[1], ev.gsensor.data[2]);
-                }
+                const float *d = ev.gsensor.data;
+                Uint64 t = SDL_GetTicks();
+                int changed = !seen[s] || memcmp(d, last_data[s], sizeof last_data[s]);
+                if (json ? !changed : t - last_sensor[s] < 250) break;
+                last_sensor[s] = t;
+                seen[s] = 1;
+                memcpy(last_data[s], d, sizeof last_data[s]);
+                ev_begin("sensor", ev.common.timestamp);
+                if (json) printf(",\"name\":\"%s\",\"data\":[%.4f,%.4f,%.4f]", sname[s], d[0], d[1], d[2]);
+                else printf(" %s %.4f %.4f %.4f", sname[s], d[0], d[1], d[2]);
+                ev_end();
                 break;
             }
             case SDL_EVENT_GAMEPAD_REMOVED:
-                printf("ev t=%llu removed\n", (unsigned long long)t);
+                ev_begin("removed", ev.common.timestamp);
+                ev_end();
+                end = 0;
+                break;
+            case SDL_EVENT_QUIT: /* SIGINT / SIGTERM */
                 end = 0;
                 break;
             default:
@@ -198,7 +368,8 @@ int main(int argc, char **argv)
 
 done:
     ps = SDL_GetGamepadPowerInfo(pad, &pct);
-    printf("final.power=%s\nfinal.battery=%d\n", pstate(ps), pct);
+    fact_s("final.power", pstate(ps));
+    fact_i("final.battery", pct);
     SDL_CloseGamepad(pad);
     SDL_Quit();
     return 0;

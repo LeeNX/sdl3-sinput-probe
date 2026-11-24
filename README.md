@@ -33,7 +33,7 @@ SDL_VERSION=3.4.20 SDL_SHA256=<sha256 of SDL3-3.4.20.tar.gz> ./build.sh arm64   
 ## sdl3probe
 
 ```text
-sdl3probe [--wait S] [--events S] [--rumble LO HI MS] [--led R G B] [--player N] [--no-hidapi]
+sdl3probe [--wait S] [--events S] [--rumble LO HI MS] [--led R G B] [--player N] [--no-hidapi] [--json]
 ```
 
 It waits up to `--wait` seconds for a gamepad, then prints one `key=value` line per fact:
@@ -47,6 +47,14 @@ It waits up to `--wait` seconds for a gamepad, then prints one `key=value` line 
 `--rumble`, `--led` and `--player` send those to the device. `--events S` prints input events for S seconds
 (`ev t=<ms> button|axis|touch|sensor ...`, sensors throttled to 4 Hz). `--no-hidapi` turns off SDL's HIDAPI drivers
 to compare with the evdev path.
+
+`--json` prints the same as JSON lines for a script to read: `{"fact": "driver", "value": "hidapi"}` per fact
+(lists as arrays), `{"ev": "button", "t": 1187, "mono_ns": ..., "name": "a", "down": true}` per event, and
+`{"fact": "listening", "value": 1}` when the event stream starts. `mono_ns` is the event's time on
+`CLOCK_MONOTONIC`, the clock Python's `time.monotonic_ns()` reads, so a script can time an event from the command
+that caused it, or line up two probes (one `--no-hidapi`) watching the same device. SDL takes an evdev event's time
+from the kernel, and a HIDAPI report's from when it read it (the probe reads every ~2 ms). In `--json` mode sensor
+lines come only when a reading changes. SIGINT/SIGTERM end `--events` early and still print the `final.*` facts.
 
 HIDAPI needs read/write access to the device's `/dev/hidraw*` node. Without it SDL silently falls back to evdev, so
 check `driver=` first.
@@ -81,6 +89,15 @@ python3 tools/sinput_try.py /dev/ttyUSB0 ~/sdl3/sdl3-3.4.18/bin/sdl3probe [--no-
 | RGB LED | ✅ | — |
 | Player LED | ✅ player index 2 → device LED 3 | — |
 | Battery | ❌ `unknown` (corner case 2) | `unknown` |
+
+2026-11-24 on an x86 tester (Ubuntu, kernel 7.0, BlueZ, linux-hid-sinput 0.4.4), same board, firmware at f97085e5,
+comparing four paths at once with the HIL repo's `tester/sdl3_compare.py`: HIDAPI and evdev, each under hid-generic
+and under linux-hid-sinput. HIDAPI is the same under either kernel driver (hidraw is there either way), and so is
+evdev under linux-hid-sinput, apart from what the table above says it lacks. **evdev under hid-generic** is where SDL
+goes wrong: SDL guesses a mapping, and in it the d-pad (hat) comes out as `y`, the `z` axis (right stick X) as
+`lefttrigger` and `rx` (left trigger) as `rightx`, and the special buttons (`back`) never arrive. There's no rumble
+either. Button latency (press over serial to SDL event, p50 of 40) came out between 8.4 and 10.6 ms on every path.
+evdev reads about 1 ms faster only because SDL times evdev events with the kernel's timestamp.
 
 ### Corner case 1: a released trigger reads half-pulled
 
